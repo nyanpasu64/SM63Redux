@@ -1,0 +1,58 @@
+
+# comment yay!
+
+# declare variables
+num = 19 # numbers
+msg1 = "Hello" # strings
+msg2 = :World # atoms
+
+# to print something, use !print or %
+!print(msg1)
+%(msg2)
+%("Hello, World!")
+
+# declare a named function with one argument
+# the function body must be incremented with a tab
+# the return value of a function is the return value of the last statement in that function, so there is no return keyword
+simple_function(txt)
+	<< txt
+
+# we can overload functions
+foo(x)
+	%(x)
+foo(x, y)
+	%(x + y)
+
+# to call a function, use a ! prefix, then simply use << to pass arguments
+!foo << 1
+!foo << 1, 2
+
+# declare a function with a guard, guards are conditions which have to be met before this function can run
+# we can use this to overload the same function even though it has the same parameters
+# below the `goal == idx` is the guard, meaning this definition will only run once the goal matches the index
+loop(func, goal, idx) goal == idx
+	:finished
+# if it did not match the index, then it will run this
+loop(func, goal, idx)
+	!func(idx)
+	!loop(func, goal, idx + 1)
+# if no third argument was given, then this will always run
+loop(func, goal)
+	!loop(func, goal, 0)
+
+# we can use @() to declare anonymous functions
+# anonymous functions cannot have guards
+!loop(@(idx)
+	<< idx
+, 10)
+
+# math
+%(1 + 2) # addition
+%(1 - 2) # subtraction
+%(1 * 2) # multiplication
+%(1 / 2) # division
+%((1 + 2) * 5) # brackets
+
+"TEST \" THIS IS ONE STRING"
+"THESE ARE\\TWO""STRINGS"
+"THIS IS AN INVALID SEQUENCE \\""

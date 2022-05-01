@@ -177,6 +177,9 @@ func read_items():
 	#print(item_textures)
 
 func _ready():
+	var pipe_script = load("res://src/pipe_script/ps_root.tscn").instance()
+	add_child(pipe_script)
+	
 	var template = lv_template.instance()
 	call_deferred("add_child", template)
 	
