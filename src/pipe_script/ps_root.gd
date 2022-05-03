@@ -117,11 +117,11 @@ func parse(body: String):
 	var tokens = parse_tokens(body)
 	interpret(tokens)
 
-func is_math_input(token):
-	return token.type == "raw" || token.type == "number"
+func is_literal(token):
+	return token.type == "string" || token.type == "atom" || token.type == "number"
 
-func is_math_token(token):
-	return is_math_input(token) || token.type.begins_with("math_") || token.type.begins_with("bracket_")
+func is_value(token):
+	return is_literal(token) || token.type == "call" || token.type == "raw"
 
 func handle_expression(queue: Array):
 	var idx = 0
@@ -212,20 +212,53 @@ func get_expression_sequence(tokens, token_size, token_idx):
 		
 		prev_type = current_type
 		token_idx += 1
-	return sequence
+	
+	# if we actually detected an expression, make sure to handle the brackets properly
+	var return_seq = sequence
+	if sequence.size() > 2:
+		var seq_idx = 0
+		var stack = []
+		var queue = []
+		while seq_idx < sequence.size():
+			var token = sequence[seq_idx]
+			if token.type == "bracket_left":
+				token = null
+				stack.append(queue)
+				queue = []
+			elif token.type == "bracket_right":
+				token = queue
+				queue = stack.pop_back()
+			
+			if token:
+				queue.append(token)
+			seq_idx += 1
+		return_seq = queue
+	
+	# return
+	return [return_seq, sequence.size()]
 
 func interpret(tokens):
 	var token_size = tokens.size()
+	var variables = {}
 	
 	var token_idx = 0
 	while token_idx < token_size:
 		var token = tokens[token_idx]
+		var prev_token = tokens[token_idx - 1] if token_idx > 0 else null
+		var dprev_token = tokens[token_idx - 2] if token_idx > 1 else null
+		var idx_inc = 1
 		
-		var seq = get_expression_sequence(tokens, token_size, token_idx)
-		if seq.size() > 2:
-			token_idx += seq.size()
-			continue
-		token_idx += 1
+		var possible_value = token
+		var expr_seq = get_expression_sequence(tokens, token_size, token_idx)
+		if expr_seq[1] > 2:
+			idx_inc = expr_seq[1]
+			possible_value = handle_expression(expr_seq[0])
+		
+		if prev_token && dprev_token && dprev_token.type == "raw" && prev_token.type == "assign":
+			variables[dprev_token.body] = possible_value
+		
+		token_idx += idx_inc
+	print(variables)
 
 func parse_tokens(body: String):
 	var body_length = body.length()
