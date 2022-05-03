@@ -47,6 +47,65 @@ var math_order = {
 	"math_or": 1,
 }
 
+var expression_acceptance_table = {
+	"bracket_left": {
+		"bracket_left": true,
+		"bracket_right": true,
+		"number": true,
+		"call": true,
+		"raw": true,
+		"math_": false,
+	},
+	"bracket_right": {
+		"bracket_left": true,
+		"bracket_right": true,
+		"number": false,
+		"call": false,
+		"raw": false,
+		"math_": true,
+	},
+	"number": {
+		"bracket_left": false,
+		"bracket_right": true,
+		"number": false,
+		"call": false,
+		"raw": false,
+		"math_": true,
+	},
+	"call": {
+		"bracket_left": false,
+		"bracket_right": true,
+		"number": false,
+		"call": false,
+		"raw": false,
+		"math_": true,
+	},
+	"raw": {
+		"bracket_left": false,
+		"bracket_right": true,
+		"number": false,
+		"call": false,
+		"raw": false,
+		"math_": true,
+	},
+	"math_": {
+		"bracket_left": true,
+		"bracket_right": false,
+		"number": true,
+		"call": true,
+		"raw": true,
+		"math_": false,
+	},
+	"begin": {
+		"bracket_left": true,
+		"bracket_right": false,
+		"number": true,
+		"call": true,
+		"raw": true,
+		"math_": false,
+	},
+}
+
 # a handy function to check if a string of bytes is alphanumeric
 func is_alphanumeric(s: String):
 	for byte in s.to_ascii():
@@ -126,12 +185,34 @@ func handle_expression(queue: Array):
 		# handle the stack
 		queue[best.idx] = {
 			body = str(result),
-			type = "number"
+			type = "number",
+			line = queue[best.idx].line
 		}
 		queue.pop_at(best.idx - 2)
 		queue.pop_at(best.idx - 2)
 		size = queue.size()
 	return queue[0]
+
+func get_expression_sequence(tokens, token_size, token_idx):	
+	var sequence = []
+	var prev_type = "begin"
+	while token_idx < token_size:
+		var current_type = tokens[token_idx].type
+		current_type = "math_" if current_type.begins_with("math_") else current_type
+		prev_type = "math_" if prev_type.begins_with("math_") else prev_type
+		
+		if !expression_acceptance_table.has(prev_type):
+			break
+		if !expression_acceptance_table[prev_type].has(current_type):
+			break
+		if expression_acceptance_table[prev_type][current_type]:
+			sequence.append(tokens[token_idx])
+		else:
+			break
+		
+		prev_type = current_type
+		token_idx += 1
+	return sequence
 
 func interpret(tokens):
 	var token_size = tokens.size()
@@ -140,33 +221,11 @@ func interpret(tokens):
 	while token_idx < token_size:
 		var token = tokens[token_idx]
 		
-		if is_math_token(token):
-			var queue_stack = []
-			var current_queue = []
-			var current_token_idx = token_idx
-			while current_token_idx < token_size && is_math_token(tokens[current_token_idx]):
-				var current_token = tokens[current_token_idx]
-				if current_token.type == "bracket_left":
-					current_token = null
-					queue_stack.append(current_queue)
-					current_queue = []
-				elif current_token.type == "bracket_right":
-					current_token = current_queue
-					current_queue = queue_stack.pop_back()
-				
-				if current_token:
-					current_queue.append(current_token)
-				current_token_idx += 1
-			
-			token_idx += current_token_idx - token_idx
-			var result = handle_expression(current_queue)
-			print(result)
+		var seq = get_expression_sequence(tokens, token_size, token_idx)
+		if seq.size() > 2:
+			token_idx += seq.size()
 			continue
-				
 		token_idx += 1
-		
-			#var token_2 = tokens[(token_idx + 2) % token_size]
-			
 
 func parse_tokens(body: String):
 	var body_length = body.length()
@@ -258,9 +317,17 @@ func parse_tokens(body: String):
 	
 	# filter comment tokens
 	var returns = []
-	for token in tokens:
-		if token.type != "comment":
-			returns.append(token)
+	var make_next_call = false
+	for token_idx in tokens.size():
+		if tokens[token_idx].type != "comment":
+			if tokens[token_idx].type == "call":
+				make_next_call = true
+			else:
+				if make_next_call:
+					if tokens[token_idx].type != "raw":
+						printerr("COMPILE ERROR:\nLine %d: Can only call function names." % tokens[token_idx].line)
+					tokens[token_idx].type = "call"
+				returns.append(tokens[token_idx])
 	
 	return returns
 
