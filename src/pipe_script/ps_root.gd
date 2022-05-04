@@ -11,15 +11,18 @@ var token_types = {
 	"!": "call",
 	"%(": "print_call",
 	"==": "math_eq",
-	"~=": "math_neq",
+	"!=": "math_neq",
 	">=": "math_gte",
 	"<=": "math_lte",
 	"&&": "math_and",
 	"||": "math_or",
+	"@": "anon_func",
 	">": "math_gt",
 	"<": "math_lt",
 	")": "bracket_right",
 	"(": "bracket_left",
+	"{": "func_left",
+	"}": "func_right",
 	"=": "assign",
 	"*": "math_mul",
 	"/": "math_div",
@@ -29,7 +32,6 @@ var token_types = {
 	":": "atom",
 	"\"": "string",
 	"#": "comment",
-	"\t": "tab",
 }
 
 var math_order = {
@@ -115,7 +117,99 @@ func is_alphanumeric(s: String):
 
 func parse(body: String):
 	var tokens = parse_tokens(body)
-	interpret(tokens)
+#	interpret(tokens)
+	chunkify_tokens(tokens)
+
+# use for debugging
+func print_scope(scope, prefix = ""):
+	for token in scope.tokens:
+		if token.type == "scope":
+			print("function body of %s: " % token.func_id)
+			print_scope(token, prefix + "\t")
+		else:
+			print(prefix, token)
+
+# put tokens from functions into chunks, so it's easier for the interpreter to read
+func chunkify_tokens(tokens):
+	var token_idx = 0
+	var token_size = tokens.size()
+	var stack = []
+	var scope = {
+		body = "",
+		type = "scope",
+		func_id = ".?",
+		params = [],
+		guard_expr = [],
+		variables = {},
+		tokens = []
+	}
+	while token_idx < token_size:
+		var token = tokens[token_idx]
+		if token.type == "func_left":
+			token = null
+			# get the function name
+			var func_name_idx = token_idx - 1
+			var func_name = ""
+			while func_name_idx >= 0:
+				var func_token = tokens[func_name_idx]
+				var bracket_token = tokens[func_name_idx + 1]
+				if (func_token.type == "raw" || func_token.type == "anon_func") && bracket_token.type == "bracket_left":
+					func_name = func_token.body if func_token.type == "raw" else ".anon@%d" % token_idx
+					break
+				func_name_idx -= 1
+			# if we ran out of indexes, that means something went wrong
+			if func_name_idx == -1:
+				printerr("COMPILE ERROR:\nLine %d: Incomplete function definition." % tokens[token_idx].line)
+				break
+			# get the parameters
+			var params_data = get_param_sequence(tokens, token_size, func_name_idx + 1)
+			var guard_idx = params_data[1] + func_name_idx + 2
+			var guard = get_expression_sequence(tokens, token_size, guard_idx)
+			
+			# remove the old data
+			for _idx in token_idx - func_name_idx:
+				scope.tokens.pop_back()
+			
+			stack.append(scope)
+			scope = {
+				body = "",
+				type = "scope",
+				func_id = func_name,
+				params = params_data[2],
+				guard_expr = guard[0],
+				variables = {},
+				tokens = []
+			}
+			print(scope)
+		elif token.type == "func_right":
+			token = scope
+			scope = stack.pop_back()
+		
+		if token:
+			scope.tokens.append(token)
+		
+		token_idx += 1
+	print_scope(scope)
+
+# get a sequence of parameters, this will only work when called on a valid sequence
+# it returns the sequence of tokens, the actual size it read and the actual parameter names
+func get_param_sequence(tokens, token_size, token_idx):
+	var sequence = []
+	var params = []
+	var actual_size = 0
+	while token_idx < token_size:
+		var token = tokens[token_idx]
+		if token.type == "bracket_left":
+			pass
+		elif token.type == "bracket_right":
+			break
+		elif token.type == "raw" || token.type == "seperator":
+			sequence.append(token)
+			if token.type == "raw":
+				params.append(token.body)
+		actual_size += 1
+		token_idx += 1
+	return [sequence, actual_size, params]
 
 func is_literal(token):
 	return token.type == "string" || token.type == "atom" || token.type == "number"
@@ -193,7 +287,7 @@ func handle_expression(queue: Array):
 		size = queue.size()
 	return queue[0]
 
-func get_expression_sequence(tokens, token_size, token_idx):	
+func get_expression_sequence(tokens, token_size, token_idx):
 	var sequence = []
 	var prev_type = "begin"
 	while token_idx < token_size:
@@ -237,11 +331,12 @@ func get_expression_sequence(tokens, token_size, token_idx):
 	# return
 	return [return_seq, sequence.size()]
 
-func interpret(tokens):
+# Interprets the tokens & executes them
+# @param tokens global token list
+# @param tokens the variables accessable by these set of tokens, these variables include function definitions!
+# @param the index to start iterating from
+func interpret(tokens, variables = {}, token_idx = 0):
 	var token_size = tokens.size()
-	var variables = {}
-	
-	var token_idx = 0
 	while token_idx < token_size:
 		var token = tokens[token_idx]
 		var prev_token = tokens[token_idx - 1] if token_idx > 0 else null
@@ -356,10 +451,15 @@ func parse_tokens(body: String):
 			if tokens[token_idx].type == "call":
 				make_next_call = true
 			else:
+				# merge the call type into a singular token
 				if make_next_call:
 					if tokens[token_idx].type != "raw":
 						printerr("COMPILE ERROR:\nLine %d: Can only call function names." % tokens[token_idx].line)
 					tokens[token_idx].type = "call"
+				# convert atoms into strings
+				if tokens[token_idx].type == "atom":
+					tokens[token_idx].body = tokens[token_idx].body.substr(1)
+					tokens[token_idx].type = "string"
 				returns.append(tokens[token_idx])
 	
 	return returns
