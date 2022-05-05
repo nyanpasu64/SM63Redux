@@ -117,8 +117,8 @@ func is_alphanumeric(s: String):
 
 func parse(body: String):
 	var tokens = parse_tokens(body)
-#	interpret(tokens)
-	chunkify_tokens(tokens)
+	var scope = chunkify_tokens(tokens)
+	interpret(scope)
 
 # use for debugging
 func print_scope(scope, prefix = ""):
@@ -141,6 +141,7 @@ func chunkify_tokens(tokens):
 		params = [],
 		guard_expr = [],
 		variables = {},
+		funcs = [],
 		tokens = []
 	}
 	while token_idx < token_size:
@@ -178,9 +179,9 @@ func chunkify_tokens(tokens):
 				params = params_data[2],
 				guard_expr = guard[0],
 				variables = {},
+				funcs = [],
 				tokens = []
 			}
-			print(scope)
 		elif token.type == "func_right":
 			token = scope
 			scope = stack.pop_back()
@@ -189,44 +190,30 @@ func chunkify_tokens(tokens):
 			scope.tokens.append(token)
 		
 		token_idx += 1
-	print_scope(scope)
-
-# get a sequence of parameters, this will only work when called on a valid sequence
-# it returns the sequence of tokens, the actual size it read and the actual parameter names
-func get_param_sequence(tokens, token_size, token_idx):
-	var sequence = []
-	var params = []
-	var actual_size = 0
-	while token_idx < token_size:
-		var token = tokens[token_idx]
-		if token.type == "bracket_left":
-			pass
-		elif token.type == "bracket_right":
-			break
-		elif token.type == "raw" || token.type == "seperator":
-			sequence.append(token)
-			if token.type == "raw":
-				params.append(token.body)
-		actual_size += 1
-		token_idx += 1
-	return [sequence, actual_size, params]
+	return scope
 
 func is_literal(token):
 	return token.type == "string" || token.type == "atom" || token.type == "number"
 
 func is_value(token):
-	return is_literal(token) || token.type == "call" || token.type == "raw"
+	return is_literal(token) || token.type == "call" || token.type == "raw" || token.type == "scope"
 
-func handle_expression(queue: Array):
+func handle_expression(scope, expr, extra_variables = []):
 	var idx = 0
-	var size = queue.size()
+	var size = expr.size()
 	# first handle all brackets
 	while idx < size:
-		var item = queue[idx]
+		var item = expr[idx]
 		if typeof(item) == TYPE_ARRAY:
 			# if there were brackets, interpret that first
 			# we convert back to a string to be consistent
-			queue[idx] = handle_expression(queue[idx])
+			expr[idx] = handle_expression(scope, expr[idx], extra_variables)
+		else:
+			if item.type == "raw":
+				item.body = scope.variables[item.body] if scope.variables.has(item.body) else extra_variables[item.body]
+				item.type = "number"
+				print(item.body)
+				#TOMORROW: make this work
 		idx += 1
 	
 	# handle the math operations
@@ -237,7 +224,7 @@ func handle_expression(queue: Array):
 			order = 0,
 		}
 		for best_idx in size:
-			var type = queue[best_idx].type
+			var type = expr[best_idx].type
 			if type.begins_with("math_"):
 				var order = math_order[type]
 				if order > best.order:
@@ -245,9 +232,9 @@ func handle_expression(queue: Array):
 					best.order = order
 		
 		# get the operand and the two numbers to use
-		var op = queue[best.idx - 1].type
-		var a = float(queue[best.idx - 2].body) if queue[best.idx - 2].type == "number" else 0 #TODO: get variable
-		var b = float(queue[best.idx].body) if queue[best.idx].type == "number" else 0 #TODO: get variable
+		var op = expr[best.idx - 1].type
+		var a = float(expr[best.idx - 2].body) if expr[best.idx - 2].type == "number" else 0 #TODO: get variable
+		var b = float(expr[best.idx].body) if expr[best.idx].type == "number" else 0 #TODO: get variable
 		
 		var result = 0
 		match op:
@@ -277,15 +264,15 @@ func handle_expression(queue: Array):
 				result = 1 if a != 0 || b != 0 else 0
 		
 		# handle the stack
-		queue[best.idx] = {
+		expr[best.idx] = {
 			body = str(result),
 			type = "number",
-			line = queue[best.idx].line
+			line = expr[best.idx].line
 		}
-		queue.pop_at(best.idx - 2)
-		queue.pop_at(best.idx - 2)
-		size = queue.size()
-	return queue[0]
+		expr.pop_at(best.idx - 2)
+		expr.pop_at(best.idx - 2)
+		size = expr.size()
+	return expr[0]
 
 func get_expression_sequence(tokens, token_size, token_idx):
 	var sequence = []
@@ -331,29 +318,119 @@ func get_expression_sequence(tokens, token_size, token_idx):
 	# return
 	return [return_seq, sequence.size()]
 
-# Interprets the tokens & executes them
-# @param tokens global token list
-# @param tokens the variables accessable by these set of tokens, these variables include function definitions!
-# @param the index to start iterating from
-func interpret(tokens, variables = {}, token_idx = 0):
-	var token_size = tokens.size()
+# get a sequence of parameters, this will only work when called on a valid sequence
+# it returns the sequence of tokens, the actual size it read and the actual parameter names
+func get_param_sequence(tokens, token_size, token_idx):
+	var sequence = []
+	var params = []
+	var actual_size = 0
 	while token_idx < token_size:
 		var token = tokens[token_idx]
-		var prev_token = tokens[token_idx - 1] if token_idx > 0 else null
-		var dprev_token = tokens[token_idx - 2] if token_idx > 1 else null
+		if token.type == "bracket_left":
+			pass
+		elif token.type == "bracket_right":
+			break
+		elif token.type == "raw" || token.type == "seperator":
+			sequence.append(token)
+			if token.type == "raw":
+				params.append(token.body)
+		actual_size += 1
+		token_idx += 1
+	return [sequence, actual_size, params]
+
+func call_builtin(token):
+	pass
+
+func get_argument_sequence(tokens, token_size, token_idx):
+	var args = []
+	var actual_size = 0
+	while token_idx < token_size:
+		var token = tokens[token_idx]
+		var idx_inc = 1
+		if token.type == "bracket_left":
+			pass
+		elif token.type == "bracket_right":
+			break
+		else:
+			var expr = get_expression_sequence(tokens, token_size, token_idx)
+			if expr[1] > 2:
+				args.append(expr[0])
+				idx_inc = expr[1]
+			elif is_value(token):
+				args.append(token)
+		token_idx += idx_inc
+		actual_size += idx_inc
+	return [args, actual_size]
+
+# Interprets the tokens & executes them
+func interpret(scope):
+	var root_scope = scope # just in case
+	var scope_stack = []
+#	var global_idx = 0
+	var token_idx = 0
+	var token_size = scope.tokens.size()
+	while token_idx < token_size:
+		var token = scope.tokens[token_idx]
+		var prev_token = scope.tokens[token_idx - 1] if token_idx > 0 else null
+		var dprev_token = scope.tokens[token_idx - 2] if token_idx > 1 else null
 		var idx_inc = 1
 		
 		var possible_value = token
-		var expr_seq = get_expression_sequence(tokens, token_size, token_idx)
+		var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
 		if expr_seq[1] > 2:
 			idx_inc = expr_seq[1]
-			possible_value = handle_expression(expr_seq[0])
+			possible_value = handle_expression(scope, expr_seq[0])
 		
 		if prev_token && dprev_token && dprev_token.type == "raw" && prev_token.type == "assign":
-			variables[dprev_token.body] = possible_value
+			if possible_value.type == "scope":
+				# we don't assign functions to variables,
+				# we simply change the func_id
+				possible_value.func_id = dprev_token.body
+				scope.funcs.append(possible_value)
+			else:
+				scope.variables[dprev_token.body] = possible_value
+#			print(dprev_token.body, " = ", possible_value)
+		elif token.type == "scope":
+			scope.funcs.append(token)
+#			print(dprev_token.body, " = ", possible_value)
+			
+		elif token.type == "call":
+			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
+			idx_inc = args[1]
+			
+			# find the function to switch too
+			var target_scope
+			for new_scope in scope.funcs:
+				if new_scope.func_id == token.body && new_scope.params.size() == args[1]:
+					#TODO: do the guard check
+					handle_expression(scope, new_scope.guard_expr)
+					target_scope = new_scope
+					#handle_expression(new_scope.guard_expr)
+					break
+			if target_scope == null:
+				printerr("ERROR:\nLine %d: Attempt to call undefined function.")
+			
+			# switch to the new scope
+			scope_stack.append([scope, token_idx + idx_inc])
+			scope = target_scope
+			token_idx = 0
+			idx_inc = 0
 		
+		# increment the token index
 		token_idx += idx_inc
-	print(variables)
+		
+		# if we ran out of instructions, go back a stack
+		if token_idx < token_size && scope_stack.size() > 0:
+			var prev = scope_stack.pop_back()
+			scope = prev[0]
+			token_idx = prev[1]
+		
+#		global_idx += idx_inc
+	
+	for key in scope.variables.keys():
+		print(key, " = ", scope.variables[key])
+	for f in scope.funcs:
+		print("function %s" % f.func_id)
 
 func parse_tokens(body: String):
 	var body_length = body.length()
@@ -456,6 +533,7 @@ func parse_tokens(body: String):
 					if tokens[token_idx].type != "raw":
 						printerr("COMPILE ERROR:\nLine %d: Can only call function names." % tokens[token_idx].line)
 					tokens[token_idx].type = "call"
+					make_next_call = false
 				# convert atoms into strings
 				if tokens[token_idx].type == "atom":
 					tokens[token_idx].body = tokens[token_idx].body.substr(1)
