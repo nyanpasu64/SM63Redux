@@ -251,17 +251,17 @@ func handle_expression(scope, expr, extra_variables = []):
 			"math_neq":
 				result = 0 if a == b else 1
 			"math_gte":
-				result = 1 if a >= b else 0
+				result = 0 if a < b else 1
 			"math_lte":
-				result = 1 if a <= b else 0
+				result = 0 if a > b else 1
 			"math_gt":
 				result = 1 if a > b else 0
 			"math_lt":
 				result = 1 if a < b else 0
 			"math_and":
-				result = 1 if a != 0 && b != 0 else 0
+				result = a & b
 			"math_or":
-				result = 1 if a != 0 || b != 0 else 0
+				result = a | b
 		
 		# handle the stack
 		expr[best.idx] = {
