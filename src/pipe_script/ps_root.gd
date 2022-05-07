@@ -8,7 +8,7 @@ func read_file(path):
 	return content
 
 var token_types = {
-	"!": "call",
+	"?": "call",
 	"%(": "print_call",
 	"==": "math_eq",
 	"!=": "math_neq",
@@ -16,6 +16,7 @@ var token_types = {
 	"<=": "math_lte",
 	"&&": "math_and",
 	"||": "math_or",
+	"!": "logic_not",
 	"@": "anon_func",
 	">": "math_gt",
 	"<": "math_lt",
@@ -35,6 +36,7 @@ var token_types = {
 }
 
 var math_order = {
+	"logic_not": 5,
 	"math_mul": 5,
 	"math_div": 5,
 	"math_add": 4,
@@ -57,6 +59,7 @@ var expression_acceptance_table = {
 		"call": true,
 		"raw": true,
 		"math_": false,
+		"logic_not": true,
 	},
 	"bracket_right": {
 		"bracket_left": true,
@@ -65,6 +68,7 @@ var expression_acceptance_table = {
 		"call": false,
 		"raw": false,
 		"math_": true,
+		"logic_not": true,
 	},
 	"number": {
 		"bracket_left": false,
@@ -73,6 +77,7 @@ var expression_acceptance_table = {
 		"call": false,
 		"raw": false,
 		"math_": true,
+		"logic_not": true,
 	},
 	"call": {
 		"bracket_left": false,
@@ -81,6 +86,7 @@ var expression_acceptance_table = {
 		"call": false,
 		"raw": false,
 		"math_": true,
+		"logic_not": true,
 	},
 	"raw": {
 		"bracket_left": false,
@@ -89,6 +95,7 @@ var expression_acceptance_table = {
 		"call": false,
 		"raw": false,
 		"math_": true,
+		"logic_not": false,
 	},
 	"math_": {
 		"bracket_left": true,
@@ -97,6 +104,16 @@ var expression_acceptance_table = {
 		"call": true,
 		"raw": true,
 		"math_": false,
+		"logic_not": true,
+	},
+	"logic_not": {
+		"bracket_left": true,
+		"bracket_right": false,
+		"number": true,
+		"call": true,
+		"raw": true,
+		"math_": false,
+		"logic_not": false,
 	},
 	"begin": {
 		"bracket_left": true,
@@ -105,6 +122,7 @@ var expression_acceptance_table = {
 		"call": true,
 		"raw": true,
 		"math_": false,
+		"logic_not": true,
 	},
 }
 
@@ -116,6 +134,7 @@ func is_alphanumeric(s: String):
 	return true
 
 func parse(body: String):
+	body += "\n"
 	var tokens = parse_tokens(body)
 	var scope = chunkify_tokens(tokens)
 	interpret(scope)
@@ -225,52 +244,58 @@ func handle_expression(scope, expr, extra_variables = []):
 		}
 		for best_idx in size:
 			var type = expr[best_idx].type
-			if type.begins_with("math_"):
+			if type.begins_with("math_") || type.begins_with("logic_"):
 				var order = math_order[type]
 				if order > best.order:
 					best.idx = best_idx + 1
 					best.order = order
 		
-		# get the opcode and the two numbers to use
+		# get the opcode and the two operands to use
 		var op = expr[best.idx - 1].type
-		var a = float(expr[best.idx - 2].body) if expr[best.idx - 2].type == "number" else 0 #TODO: get variable
 		var b = float(expr[best.idx].body) if expr[best.idx].type == "number" else 0 #TODO: get variable
-		
 		var result = 0
-		match op:
-			"math_add":
-				result = a + b
-			"math_sub":
-				result = a - b
-			"math_div":
-				result = a / b
-			"math_mul":
-				result = a * b
-			"math_eq":
-				result = 1 if a == b else 0
-			"math_neq":
-				result = 0 if a == b else 1
-			"math_gte":
-				result = 0 if a < b else 1
-			"math_lte":
-				result = 0 if a > b else 1
-			"math_gt":
-				result = 1 if a > b else 0
-			"math_lt":
-				result = 1 if a < b else 0
-			"math_and":
-				result = a & b
-			"math_or":
-				result = a | b
-		
+		if op == "logic_not":
+			result = 0 if b else 1
+		else:
+			var a = float(expr[best.idx - 2].body) if expr[best.idx - 2].type == "number" else 0 #TODO: get variable
+			
+			match op:
+				"math_add":
+					result = a + b
+				"math_sub":
+					result = a - b
+				"math_div":
+					result = a / b
+				"math_mul":
+					result = a * b
+				"math_eq":
+					result = 1 if a == b else 0
+				"math_neq":
+					result = 0 if a == b else 1
+				"math_gte":
+					result = 0 if a < b else 1
+				"math_lte":
+					result = 0 if a > b else 1
+				"math_gt":
+					result = 1 if a > b else 0
+				"math_lt":
+					result = 1 if a < b else 0
+				"math_and":
+					result = a & b
+				"math_or":
+					result = a | b
+			
 		# handle the stack
 		expr[best.idx] = {
 			body = str(result),
 			type = "number",
 			line = expr[best.idx].line
 		}
-		expr.pop_at(best.idx - 2)
-		expr.pop_at(best.idx - 2)
+		if op == "logic_not":
+			expr.pop_at(best.idx - 1)
+		else:
+			expr.pop_at(best.idx - 2)
+			expr.pop_at(best.idx - 2)
 		size = expr.size()
 	return expr[0]
 
@@ -377,7 +402,7 @@ func interpret(scope):
 		
 		var possible_value = token
 		var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
-		if expr_seq[1] > 2:
+		if expr_seq[1] > 1:
 			idx_inc = expr_seq[1]
 			possible_value = handle_expression(scope, expr_seq[0])
 		
@@ -531,6 +556,7 @@ func parse_tokens(body: String):
 				# merge the call type into a singular token
 				if make_next_call:
 					if tokens[token_idx].type != "raw":
+						print(tokens)
 						printerr("COMPILE ERROR:\nLine %d: Can only call function names." % tokens[token_idx].line)
 					tokens[token_idx].type = "call"
 					make_next_call = false
