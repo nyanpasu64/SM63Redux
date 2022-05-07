@@ -210,7 +210,7 @@ func handle_expression(scope, expr, extra_variables = []):
 			expr[idx] = handle_expression(scope, expr[idx], extra_variables)
 		else:
 			if item.type == "raw":
-				item.body = scope.variables[item.body] if scope.variables.has(item.body) else extra_variables[item.body]
+				item.body = scope.variables[item.body].body if scope.variables.has(item.body) else extra_variables[item.body].body
 				item.type = "number"
 				print(item.body)
 				#TOMORROW: make this work
@@ -231,7 +231,7 @@ func handle_expression(scope, expr, extra_variables = []):
 					best.idx = best_idx + 1
 					best.order = order
 		
-		# get the operand and the two numbers to use
+		# get the opcode and the two numbers to use
 		var op = expr[best.idx - 1].type
 		var a = float(expr[best.idx - 2].body) if expr[best.idx - 2].type == "number" else 0 #TODO: get variable
 		var b = float(expr[best.idx].body) if expr[best.idx].type == "number" else 0 #TODO: get variable
