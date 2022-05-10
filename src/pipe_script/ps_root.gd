@@ -80,8 +80,8 @@ var expression_acceptance_table = {
 		"logic_not": true,
 	},
 	"call": {
-		"bracket_left": false,
-		"bracket_right": true,
+		"bracket_left": true,
+		"bracket_right": false,
 		"number": false,
 		"call": false,
 		"raw": false,
@@ -141,12 +141,14 @@ func parse(body: String):
 
 # use for debugging
 func print_scope(scope, prefix = ""):
+	var idx = 0
 	for token in scope.tokens:
 		if token.type == "scope":
-			print("function body of %s: " % token.func_id)
+			print(prefix, idx, "> function body of %s: " % token.func_id)
 			print_scope(token, prefix + "\t")
 		else:
-			print(prefix, token)
+			print(prefix, idx, "> ", token)
+		idx += 1
 
 # put tokens from functions into chunks, so it's easier for the interpreter to read
 func chunkify_tokens(tokens):
@@ -231,8 +233,9 @@ func handle_expression(scope, expr, extra_variables = []):
 			if item.type == "raw":
 				item.body = scope.variables[item.body].body if scope.variables.has(item.body) else extra_variables[item.body].body
 				item.type = "number"
-				print(item.body)
+			elif item.type == "call":
 				#TOMORROW: make this work
+				pass
 		idx += 1
 	
 	# handle the math operations
@@ -378,7 +381,7 @@ func get_argument_sequence(tokens, token_size, token_idx):
 			break
 		else:
 			var expr = get_expression_sequence(tokens, token_size, token_idx)
-			if expr[1] > 2:
+			if expr[0].size() > 1:
 				args.append(expr[0])
 				idx_inc = expr[1]
 			elif is_value(token):
@@ -389,9 +392,13 @@ func get_argument_sequence(tokens, token_size, token_idx):
 
 # Interprets the tokens & executes them
 func interpret(scope):
+	print("\n")
+	print_scope(scope)
+	print("\n")
 	var root_scope = scope # just in case
 	var scope_stack = []
-#	var global_idx = 0
+	var expression_go_back = [-1, -1, []] # idx, end_idx, expression
+	
 	var token_idx = 0
 	var token_size = scope.tokens.size()
 	while token_idx < token_size:
@@ -400,11 +407,42 @@ func interpret(scope):
 		var dprev_token = scope.tokens[token_idx - 2] if token_idx > 1 else null
 		var idx_inc = 1
 		
+		print("EXEC: ", token_idx, " : ", token.body)
+		
 		var possible_value = token
-		var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
-		if expr_seq[1] > 1:
-			idx_inc = expr_seq[1]
-			possible_value = handle_expression(scope, expr_seq[0])
+		if expression_go_back[0] == -1:
+			var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
+			if expr_seq[0].size() > 1:
+				expression_go_back = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
+		elif token_idx == expression_go_back[0]:
+			idx_inc = expression_go_back[2][1]
+			possible_value = handle_expression(scope, expression_go_back[2][0])
+			expression_go_back = [-1, -1, []]
+		elif token_idx == expression_go_back[1]:
+			idx_inc -= expression_go_back[2][1]
+		
+		if token.type == "call":
+			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
+			idx_inc = args[1]
+			
+			# find the function to switch too
+			var target_scope
+			for new_scope in scope.funcs:
+				if new_scope.func_id == token.body && new_scope.params.size() == args[0].size():
+					#TODO: do the guard check
+#					handle_expression(scope, new_scope.guard_expr)
+					target_scope = new_scope
+					#handle_expression(new_scope.guard_expr)
+					break
+			if target_scope == null:
+				printerr("ERROR:\nLine %d: Attempt to call undefined function.")
+			
+			# switch to the new scope
+			scope_stack.append([scope, token_idx + idx_inc])
+			scope = target_scope
+			token_size = scope.tokens.size()
+			token_idx = 0
+			idx_inc = 0
 		
 		if prev_token && dprev_token && dprev_token.type == "raw" && prev_token.type == "assign":
 			if possible_value.type == "scope":
@@ -418,40 +456,21 @@ func interpret(scope):
 		elif token.type == "scope":
 			scope.funcs.append(token)
 #			print(dprev_token.body, " = ", possible_value)
-			
-		elif token.type == "call":
-			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
-			idx_inc = args[1]
-			
-			# find the function to switch too
-			var target_scope
-			for new_scope in scope.funcs:
-				if new_scope.func_id == token.body && new_scope.params.size() == args[1]:
-					#TODO: do the guard check
-					handle_expression(scope, new_scope.guard_expr)
-					target_scope = new_scope
-					#handle_expression(new_scope.guard_expr)
-					break
-			if target_scope == null:
-				printerr("ERROR:\nLine %d: Attempt to call undefined function.")
-			
-			# switch to the new scope
-			scope_stack.append([scope, token_idx + idx_inc])
-			scope = target_scope
-			token_idx = 0
-			idx_inc = 0
 		
 		# increment the token index
 		token_idx += idx_inc
 		
 		# if we ran out of instructions, go back a stack
-		if token_idx < token_size && scope_stack.size() > 0:
+		if token_idx >= token_size && scope_stack.size() > 0:
+			print(possible_value) #this would be the return value
 			var prev = scope_stack.pop_back()
 			scope = prev[0]
 			token_idx = prev[1]
+			token_size = scope.tokens.size()
 		
 #		global_idx += idx_inc
 	
+	print("\nAppData:")
 	for key in scope.variables.keys():
 		print(key, " = ", scope.variables[key])
 	for f in scope.funcs:
@@ -546,7 +565,7 @@ func parse_tokens(body: String):
 			char_idx += 1
 	
 	# filter comment tokens
-	var returns = []
+	var middle = []
 	var make_next_call = false
 	for token_idx in tokens.size():
 		if tokens[token_idx].type != "comment":
@@ -564,9 +583,29 @@ func parse_tokens(body: String):
 				if tokens[token_idx].type == "atom":
 					tokens[token_idx].body = tokens[token_idx].body.substr(1)
 					tokens[token_idx].type = "string"
-				returns.append(tokens[token_idx])
+				middle.append(tokens[token_idx])
 	
-	return returns
+	return middle
+#	var returns = []
+#	var token_size = middle.size()
+#	var token_idx = 0
+#	while token_idx < token_size:
+#		var token = middle[token_idx]
+#		var inc_idx = 1
+#
+#		var expr_seq = get_expression_sequence(middle, token_size, token_idx)
+#		if expr_seq[1] > 1:
+#			returns.append({
+#				body = "",
+#				type = "expression",
+#				expr = expr_seq[0],
+#				line = token.line
+#			})
+#			inc_idx = expr_seq[1]
+#		else:
+#			returns.append(token)
+#		token_idx += inc_idx
+#	return returns
 
 func _ready():
 	var demo: String = read_file("res://src/pipe_script/demo.psl")
