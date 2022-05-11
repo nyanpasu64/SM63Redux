@@ -126,7 +126,7 @@ var expression_acceptance_table = {
 	},
 }
 
-# a handy function to check if a string of bytes is alphanumeric
+# a handy function to check if a string of bytes is alphanumeric (. included)
 func is_alphanumeric(s: String):
 	for byte in s.to_ascii():
 		if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 46):
@@ -163,7 +163,8 @@ func chunkify_tokens(tokens):
 		guard_expr = [],
 		variables = {},
 		funcs = [],
-		tokens = []
+		tokens = [],
+		parent_scope = null
 	}
 	while token_idx < token_size:
 		var token = tokens[token_idx]
@@ -201,7 +202,8 @@ func chunkify_tokens(tokens):
 				guard_expr = guard[0],
 				variables = {},
 				funcs = [],
-				tokens = []
+				tokens = [],
+				parent_scope = scope
 			}
 		elif token.type == "func_right":
 			token = scope
@@ -219,6 +221,17 @@ func is_literal(token):
 func is_value(token):
 	return is_literal(token) || token.type == "call" || token.type == "raw" || token.type == "scope"
 
+# get a variable from the scope
+# this function also checks parent scopes for the variable
+func get_variable(scope, var_name):
+	var search_in_scope = scope
+	while search_in_scope:
+		if scope.variables[var_name]:
+			return scope.variables[var_name]
+		search_in_scope = scope.parent
+	return null
+
+# actually evaluate the provided expression
 func handle_expression(scope, expr, extra_variables = []):
 	var idx = 0
 	var size = expr.size()
@@ -231,7 +244,7 @@ func handle_expression(scope, expr, extra_variables = []):
 			expr[idx] = handle_expression(scope, expr[idx], extra_variables)
 		else:
 			if item.type == "raw":
-				item.body = scope.variables[item.body].body if scope.variables.has(item.body) else extra_variables[item.body].body
+				item.body = get_variable(scope, item.body).body if get_variable(scope, item.body) else extra_variables[item.body].body
 				item.type = "number"
 			elif item.type == "call":
 				#TOMORROW: make this work
@@ -371,7 +384,7 @@ func call_builtin(token):
 
 func get_argument_sequence(tokens, token_size, token_idx):
 	var args = []
-	var actual_size = 0
+	var actual_size = 1
 	while token_idx < token_size:
 		var token = tokens[token_idx]
 		var idx_inc = 1
@@ -399,6 +412,8 @@ func interpret(scope):
 	var scope_stack = []
 	var expression_go_back = [-1, -1, []] # idx, end_idx, expression
 	
+	var return_data = null
+	
 	var token_idx = 0
 	var token_size = scope.tokens.size()
 	while token_idx < token_size:
@@ -407,7 +422,7 @@ func interpret(scope):
 		var dprev_token = scope.tokens[token_idx - 2] if token_idx > 1 else null
 		var idx_inc = 1
 		
-		print("EXEC: ", token_idx, " : ", token.body)
+		print("\t".repeat(scope_stack.size()), "EXEC: ", token_idx, " : ", token.body)
 		
 		var possible_value = token
 		if expression_go_back[0] == -1:
@@ -423,28 +438,38 @@ func interpret(scope):
 		
 		if token.type == "call":
 			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
-			idx_inc = args[1]
+			idx_inc = args[1] + 1
 			
-			# find the function to switch too
-			var target_scope
-			for new_scope in scope.funcs:
-				if new_scope.func_id == token.body && new_scope.params.size() == args[0].size():
-					#TODO: do the guard check
-#					handle_expression(scope, new_scope.guard_expr)
-					target_scope = new_scope
-					#handle_expression(new_scope.guard_expr)
+			if return_data:
+				possible_value = return_data
+				return_data = null
+			else:
+				# find the function to switch too
+				var target_scope
+				var search_in_scope = scope
+				while search_in_scope:
+					for new_scope in search_in_scope.funcs:
+						if new_scope.func_id == token.body && new_scope.params.size() == args[0].size():
+							#TODO: do the guard check
+		#					handle_expression(scope, new_scope.guard_expr)
+							target_scope = new_scope
+							#handle_expression(new_scope.guard_expr)
+							break
+					if target_scope:
+						break
+					search_in_scope = search_in_scope.parent_scope
+				if target_scope == null:
+					printerr("ERROR:\nLine %d: Attempt to call undefined function." % token.line)
 					break
-			if target_scope == null:
-				printerr("ERROR:\nLine %d: Attempt to call undefined function.")
-			
-			# switch to the new scope
-			scope_stack.append([scope, token_idx + idx_inc])
-			scope = target_scope
-			token_size = scope.tokens.size()
-			token_idx = 0
-			idx_inc = 0
+				
+				# switch to the new scope
+				scope_stack.append([scope, token_idx])
+				scope = target_scope
+				token_size = scope.tokens.size()
+				token_idx = 0
+				idx_inc = 0
 		
-		if prev_token && dprev_token && dprev_token.type == "raw" && prev_token.type == "assign":
+		if prev_token && dprev_token && (dprev_token.type == "raw" || dprev_token.type == "call" && !return_data) && prev_token.type == "assign":
 			if possible_value.type == "scope":
 				# we don't assign functions to variables,
 				# we simply change the func_id
@@ -462,7 +487,8 @@ func interpret(scope):
 		
 		# if we ran out of instructions, go back a stack
 		if token_idx >= token_size && scope_stack.size() > 0:
-			print(possible_value) #this would be the return value
+			return_data = possible_value
+			
 			var prev = scope_stack.pop_back()
 			scope = prev[0]
 			token_idx = prev[1]
@@ -470,9 +496,10 @@ func interpret(scope):
 		
 #		global_idx += idx_inc
 	
-	print("\nAppData:")
+	print("\nAppData (VARS):")
 	for key in scope.variables.keys():
 		print(key, " = ", scope.variables[key])
+	print("\nAppData (FUNCS):")
 	for f in scope.funcs:
 		print("function %s" % f.func_id)
 
@@ -575,8 +602,8 @@ func parse_tokens(body: String):
 				# merge the call type into a singular token
 				if make_next_call:
 					if tokens[token_idx].type != "raw":
-						print(tokens)
 						printerr("COMPILE ERROR:\nLine %d: Can only call function names." % tokens[token_idx].line)
+						break
 					tokens[token_idx].type = "call"
 					make_next_call = false
 				# convert atoms into strings
