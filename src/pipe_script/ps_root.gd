@@ -156,15 +156,16 @@ func chunkify_tokens(tokens):
 	var token_size = tokens.size()
 	var stack = []
 	var scope = {
-		body = "",
+		body = "", # keep this empty
 		type = "scope",
-		func_id = ".?",
-		params = [],
-		guard_expr = [],
-		variables = {},
-		funcs = [],
-		tokens = [],
-		parent_scope = null
+		func_id = ".?", # the function name/id
+		params = [], # function parameters
+		guard_expr = [], # the function guard
+		variables = {}, # defined variables in this function
+		funcs = [], # defined functions in this function
+		tokens = [], # tokens to be interpreted in this function
+		parent_scope = null, # a reference to the parent scope, NOT the previous scope
+		handle_expr = [-1, -1, []] # the expression currently being 'compiled'
 	}
 	while token_idx < token_size:
 		var token = tokens[token_idx]
@@ -203,7 +204,8 @@ func chunkify_tokens(tokens):
 				variables = {},
 				funcs = [],
 				tokens = [],
-				parent_scope = scope
+				parent_scope = scope,
+				handle_expr = [-1, -1, []]
 			}
 		elif token.type == "func_right":
 			token = scope
@@ -226,9 +228,10 @@ func is_value(token):
 func get_variable(scope, var_name):
 	var search_in_scope = scope
 	while search_in_scope:
-		if scope.variables[var_name]:
-			return scope.variables[var_name]
-		search_in_scope = scope.parent
+		if search_in_scope.variables.has(var_name):
+			return search_in_scope.variables[var_name]
+		search_in_scope = search_in_scope.parent_scope
+	printerr("ERROR:\nLine ?: Attempt to access non-existant variable (%s)." % var_name)
 	return null
 
 # actually evaluate the provided expression
@@ -246,9 +249,6 @@ func handle_expression(scope, expr, extra_variables = []):
 			if item.type == "raw":
 				item.body = get_variable(scope, item.body).body if get_variable(scope, item.body) else extra_variables[item.body].body
 				item.type = "number"
-			elif item.type == "call":
-				#TOMORROW: make this work
-				pass
 		idx += 1
 	
 	# handle the math operations
@@ -268,12 +268,12 @@ func handle_expression(scope, expr, extra_variables = []):
 		
 		# get the opcode and the two operands to use
 		var op = expr[best.idx - 1].type
-		var b = float(expr[best.idx].body) if expr[best.idx].type == "number" else 0 #TODO: get variable
+		var b = float(expr[best.idx].body)
 		var result = 0
 		if op == "logic_not":
 			result = 0 if b else 1
 		else:
-			var a = float(expr[best.idx - 2].body) if expr[best.idx - 2].type == "number" else 0 #TODO: get variable
+			var a = float(expr[best.idx - 2].body)
 			
 			match op:
 				"math_add":
@@ -406,11 +406,10 @@ func get_argument_sequence(tokens, token_size, token_idx):
 # Interprets the tokens & executes them
 func interpret(scope):
 	print("\n")
-	print_scope(scope)
+#	print_scope(scope)
 	print("\n")
 	var root_scope = scope # just in case
 	var scope_stack = []
-	var expression_go_back = [-1, -1, []] # idx, end_idx, expression
 	
 	var return_data = null
 	
@@ -425,24 +424,38 @@ func interpret(scope):
 		print("\t".repeat(scope_stack.size()), "EXEC: ", token_idx, " : ", token.body)
 		
 		var possible_value = token
-		if expression_go_back[0] == -1:
-			var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
-			if expr_seq[0].size() > 1:
-				expression_go_back = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
-		elif token_idx == expression_go_back[0]:
-			idx_inc = expression_go_back[2][1]
-			possible_value = handle_expression(scope, expression_go_back[2][0])
-			expression_go_back = [-1, -1, []]
-		elif token_idx == expression_go_back[1]:
-			idx_inc -= expression_go_back[2][1]
+		if !return_data:
+			# the !return_data check is to prevent function returns creating more expressions
+			if scope.handle_expr[0] == -1:
+				var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
+				if expr_seq[0].size() > 1:
+					scope.handle_expr = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
+			elif token_idx == scope.handle_expr[0]:
+				idx_inc = scope.handle_expr[2][1]
+#				print("----->", scope.handle_expr[2][0])
+				possible_value = handle_expression(scope, scope.handle_expr[2][0])
+				print("= ", possible_value)
+				scope.handle_expr = [-1, -1, []]
+			elif token_idx == scope.handle_expr[1]:
+				idx_inc -= scope.handle_expr[2][1]
 		
 		if token.type == "call":
 			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
 			idx_inc = args[1] + 1
 			
+			# if we just returned, don't go back again
 			if return_data:
 				possible_value = return_data
 				return_data = null
+				
+				# swap expression function calls with their return value
+				if scope.handle_expr[0] != -1:
+					# find the earliest function call, and swap that
+					var actual_expr = scope.handle_expr[2][0]
+					for target_idx in actual_expr.size():
+						if actual_expr[target_idx].type == "call":
+							actual_expr[target_idx] = possible_value
+							break
 			else:
 				# find the function to switch too
 				var target_scope
@@ -487,6 +500,8 @@ func interpret(scope):
 		
 		# if we ran out of instructions, go back a stack
 		if token_idx >= token_size && scope_stack.size() > 0:
+			if possible_value.type == "raw":
+				possible_value = get_variable(scope, possible_value.body)
 			return_data = possible_value
 			
 			var prev = scope_stack.pop_back()
