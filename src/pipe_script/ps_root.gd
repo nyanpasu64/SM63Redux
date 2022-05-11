@@ -405,9 +405,6 @@ func get_argument_sequence(tokens, token_size, token_idx):
 
 # Interprets the tokens & executes them
 func interpret(scope):
-	print("\n")
-#	print_scope(scope)
-	print("\n")
 	var root_scope = scope # just in case
 	var scope_stack = []
 	
@@ -421,9 +418,14 @@ func interpret(scope):
 		var dprev_token = scope.tokens[token_idx - 2] if token_idx > 1 else null
 		var idx_inc = 1
 		
-		print("\t".repeat(scope_stack.size()), "EXEC: ", token_idx, " : ", token.body)
+#		print(
+#			"\t".repeat(scope_stack.size()),
+#			"EXEC: " if scope.handle_expr[0] == -1 else "EXPRESSION: ",
+#			token_idx, " : ", token.body
+#		)
 		
 		var possible_value = token
+		var expr_finished = false
 		if !return_data:
 			# the !return_data check is to prevent function returns creating more expressions
 			if scope.handle_expr[0] == -1:
@@ -432,14 +434,13 @@ func interpret(scope):
 					scope.handle_expr = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
 			elif token_idx == scope.handle_expr[0]:
 				idx_inc = scope.handle_expr[2][1]
-#				print("----->", scope.handle_expr[2][0])
 				possible_value = handle_expression(scope, scope.handle_expr[2][0])
-				print("= ", possible_value)
 				scope.handle_expr = [-1, -1, []]
+				expr_finished = true
 			elif token_idx == scope.handle_expr[1]:
 				idx_inc -= scope.handle_expr[2][1]
 		
-		if token.type == "call":
+		if token.type == "call" && !expr_finished:
 			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
 			idx_inc = args[1] + 1
 			
@@ -490,16 +491,15 @@ func interpret(scope):
 				scope.funcs.append(possible_value)
 			else:
 				scope.variables[dprev_token.body] = possible_value
-#			print(dprev_token.body, " = ", possible_value)
 		elif token.type == "scope":
 			scope.funcs.append(token)
-#			print(dprev_token.body, " = ", possible_value)
 		
 		# increment the token index
 		token_idx += idx_inc
 		
 		# if we ran out of instructions, go back a stack
 		if token_idx >= token_size && scope_stack.size() > 0:
+			# set the return value
 			if possible_value.type == "raw":
 				possible_value = get_variable(scope, possible_value.body)
 			return_data = possible_value
@@ -508,8 +508,6 @@ func interpret(scope):
 			scope = prev[0]
 			token_idx = prev[1]
 			token_size = scope.tokens.size()
-		
-#		global_idx += idx_inc
 	
 	print("\nAppData (VARS):")
 	for key in scope.variables.keys():
