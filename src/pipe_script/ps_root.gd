@@ -17,6 +17,8 @@ var token_types = {
 	"&&": "math_and",
 	"||": "math_or",
 	"!": "logic_not",
+	"true": "boolean",
+	"false": "boolean",
 	"@": "anon_func",
 	">": "math_gt",
 	"<": "math_lt",
@@ -218,7 +220,7 @@ func chunkify_tokens(tokens):
 	return scope
 
 func is_literal(token):
-	return token.type == "string" || token.type == "atom" || token.type == "number"
+	return token.type == "string" || token.type == "atom" || token.type == "number" || token.type == "boolean"
 
 func is_value(token):
 	return is_literal(token) || token.type == "call" || token.type == "raw" || token.type == "scope"
@@ -637,16 +639,10 @@ func parse_tokens(body: String):
 					make_next_call = false
 				# convert atoms into strings
 				if tokens[token_idx].type == "atom":
-					var atom_body = tokens[token_idx].body
-					tokens[token_idx].type = "number"
-					match atom_body:
-						":true":
-							tokens[token_idx].body = 1
-						":false":
-							tokens[token_idx].body = 0
-						_:
-							tokens[token_idx].body = tokens[token_idx].body.substr(1)
-							tokens[token_idx].type = "string"
+					tokens[token_idx].body = tokens[token_idx].body.substr(1)
+					tokens[token_idx].type = "string"
+				if tokens[token_idx].type == "boolean":
+					tokens[token_idx].body = 1 if tokens[token_idx].body == "true" else 0
 				middle.append(tokens[token_idx])
 	
 	return middle
