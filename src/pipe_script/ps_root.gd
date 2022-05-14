@@ -637,8 +637,16 @@ func parse_tokens(body: String):
 					make_next_call = false
 				# convert atoms into strings
 				if tokens[token_idx].type == "atom":
-					tokens[token_idx].body = tokens[token_idx].body.substr(1)
-					tokens[token_idx].type = "string"
+					var atom_body = tokens[token_idx].body
+					tokens[token_idx].type = "number"
+					match atom_body:
+						":true":
+							tokens[token_idx].body = 1
+						":false":
+							tokens[token_idx].body = 0
+						_:
+							tokens[token_idx].body = tokens[token_idx].body.substr(1)
+							tokens[token_idx].type = "string"
 				middle.append(tokens[token_idx])
 	
 	return middle
