@@ -316,6 +316,7 @@ func handle_expression(scope, expr, extra_variables = []):
 	return expr[0]
 
 func get_expression_sequence(tokens, token_size, token_idx):
+	var bracket_pair_count: int = 0
 	var sequence = []
 	var prev_type = "begin"
 	while token_idx < token_size:
@@ -328,6 +329,12 @@ func get_expression_sequence(tokens, token_size, token_idx):
 		if !expression_acceptance_table[prev_type].has(current_type):
 			break
 		if expression_acceptance_table[prev_type][current_type]:
+			if current_type == "bracket_left":
+				bracket_pair_count += 1
+			elif current_type == "bracket_right":
+				bracket_pair_count -= 1
+			if bracket_pair_count < 0:
+				break
 			sequence.append(tokens[token_idx])
 		else:
 			break
@@ -446,6 +453,7 @@ func interpret(scope):
 			
 			# if we just returned, don't go back again
 			if return_data:
+				print(return_data)
 				possible_value = return_data
 				return_data = null
 				
@@ -479,6 +487,7 @@ func interpret(scope):
 				# switch to the new scope
 				scope_stack.append([scope, token_idx])
 				scope = target_scope
+				add_args_as_vars(scope, args)
 				token_size = scope.tokens.size()
 				token_idx = 0
 				idx_inc = 0
@@ -515,6 +524,13 @@ func interpret(scope):
 	print("\nAppData (FUNCS):")
 	for f in scope.funcs:
 		print("function %s" % f.func_id)
+
+
+func add_args_as_vars(scope, args):
+	var names = scope.params
+	for i in names.size():
+		scope.variables[names[i]] = args[0][i]
+
 
 func parse_tokens(body: String):
 	var body_length = body.length()
