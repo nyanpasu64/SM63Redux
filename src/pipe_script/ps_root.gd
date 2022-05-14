@@ -643,6 +643,7 @@ func parse_tokens(body: String):
 					tokens[token_idx].type = "string"
 				if tokens[token_idx].type == "boolean":
 					tokens[token_idx].body = 1 if tokens[token_idx].body == "true" else 0
+					tokens[token_idx].type = "number"
 				middle.append(tokens[token_idx])
 	
 	return middle
