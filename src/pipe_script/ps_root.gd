@@ -167,7 +167,7 @@ func chunkify_tokens(tokens):
 		funcs = [], # defined functions in this function
 		tokens = [], # tokens to be interpreted in this function
 		parent_scope = null, # a reference to the parent scope, NOT the previous scope
-		handle_expr = [-1, -1, []] # the expression currently being 'compiled'
+		handle_expr = [-1, -1, []], # the expression currently being 'compiled'
 	}
 	while token_idx < token_size:
 		var token = tokens[token_idx]
@@ -207,7 +207,7 @@ func chunkify_tokens(tokens):
 				funcs = [],
 				tokens = [],
 				parent_scope = scope,
-				handle_expr = [-1, -1, []]
+				handle_expr = [-1, -1, []],
 			}
 		elif token.type == "func_right":
 			token = scope
@@ -412,10 +412,11 @@ func get_argument_sequence(tokens, token_size, token_idx):
 		actual_size += idx_inc
 	return [args, actual_size]
 
-# Interprets the tokens & executes them
+# interprets the tokens & executes them
 func interpret(scope):
 	var root_scope = scope # just in case
 	var scope_stack = []
+#	print_scope(scope)
 	
 	var return_data = null
 	
@@ -427,13 +428,14 @@ func interpret(scope):
 		var dprev_token = scope.tokens[token_idx - 2] if token_idx > 1 else null
 		var idx_inc = 1
 		
-#		print(
-#			"\t".repeat(scope_stack.size()),
-#			"EXEC: " if scope.handle_expr[0] == -1 else "EXPRESSION: ",
-#			token_idx, " : ", token.body
-#		)
+		print(
+			"\t".repeat(scope_stack.size()),
+			"EXEC: " if scope.handle_expr[0] == -1 else "EXPRESSION: ",
+			token_idx, " : ", token.body
+		)
 		
 		var possible_value = token
+		
 		var expr_finished = false
 		if !return_data:
 			# the !return_data check is to prevent function returns creating more expressions
@@ -441,14 +443,17 @@ func interpret(scope):
 				var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
 				if expr_seq[0].size() > 1:
 					scope.handle_expr = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
+#					print("oh-oh ", expr_seq)
 			elif token_idx == scope.handle_expr[0]:
 				idx_inc = scope.handle_expr[2][1]
 				possible_value = handle_expression(scope, scope.handle_expr[2][0])
+#				print("SET VALUE: ", possible_value, " - ", scope.handle_expr[2][0])
 				scope.handle_expr = [-1, -1, []]
 				expr_finished = true
 			elif token_idx == scope.handle_expr[1]:
 				idx_inc -= scope.handle_expr[2][1]
 		
+#		print(token)
 		if token.type == "call" && !expr_finished:
 			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
 			idx_inc = args[1] + 1
@@ -468,6 +473,7 @@ func interpret(scope):
 							actual_expr[target_idx] = possible_value
 							break
 			else:
+				
 				# find the function to switch too
 				var target_scope
 				var search_in_scope = scope
@@ -489,18 +495,25 @@ func interpret(scope):
 				# switch to the new scope
 				scope_stack.append([scope, token_idx])
 				scope = target_scope
-				add_args_as_vars(scope, args)
+				
+				# inject variables
+				for idx in scope.params.size():
+					scope.variables[scope.params[idx]] = args[0][idx]
+				
+				for keys in scope.variables.keys():
+					print("\t\t\t\t%s: %s" % [keys, scope.variables[keys]])
+				
 				token_size = scope.tokens.size()
 				token_idx = 0
 				idx_inc = 0
 		
-		if prev_token && dprev_token && (dprev_token.type == "raw" || dprev_token.type == "call" && !return_data) && prev_token.type == "assign":
+		if prev_token && dprev_token && (dprev_token.type == "raw" && !return_data) && prev_token.type == "assign":
 			if possible_value.type == "scope":
 				# we don't assign functions to variables,
 				# we simply change the func_id
 				possible_value.func_id = dprev_token.body
 				scope.funcs.append(possible_value)
-			else:
+			elif possible_value.type != "call":
 				scope.variables[dprev_token.body] = possible_value
 		elif token.type == "scope":
 			scope.funcs.append(token)
@@ -526,13 +539,6 @@ func interpret(scope):
 	print("\nAppData (FUNCS):")
 	for f in scope.funcs:
 		print("function %s" % f.func_id)
-
-
-func add_args_as_vars(scope, args):
-	var names = scope.params
-	for i in names.size():
-		scope.variables[names[i]] = args[0][i]
-
 
 func parse_tokens(body: String):
 	var body_length = body.length()
@@ -632,9 +638,11 @@ func parse_tokens(body: String):
 			else:
 				# merge the call type into a singular token
 				if make_next_call:
-					if tokens[token_idx].type != "raw":
+					if tokens[token_idx].type != "raw" && tokens[token_idx].type != "anon_func":
 						printerr("COMPILE ERROR:\nLine %d: Can only call function names." % tokens[token_idx].line)
 						break
+					if tokens[token_idx].type == "anon_func":
+						tokens[token_idx].body = "?anon_func"
 					tokens[token_idx].type = "call"
 					make_next_call = false
 				# convert atoms into strings

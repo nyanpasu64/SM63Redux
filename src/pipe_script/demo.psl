@@ -1,17 +1,8 @@
 
-b = 2
-
-idk() {
-	1 + b
+add(a b) {
+	a + b
 }
 
-bar() {
-	?idk() * ?idk() - 3 + b
-}
-
-foo() {
-	2 + !?bar() + ?bar() * ?bar() + 1
-}
-
-a = ?foo()
-
+b = ?add(2 5)
+a = b + 5
+ 
