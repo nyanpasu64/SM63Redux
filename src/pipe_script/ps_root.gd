@@ -82,8 +82,8 @@ var expression_acceptance_table = {
 		"logic_not": true,
 	},
 	"call": {
-		"bracket_left": true,
-		"bracket_right": false,
+		"bracket_left": true, # special case, since function calls must start with '('
+		"bracket_right": true,
 		"number": false,
 		"call": false,
 		"raw": false,
@@ -318,9 +318,11 @@ func handle_expression(scope, expr, extra_variables = []):
 	return expr[0]
 
 func get_expression_sequence(tokens, token_size, token_idx):
-	var bracket_pair_count: int = 0
+	var bracket_pair_count = 0
+	var bracket_function_count = 0
 	var sequence = []
 	var prev_type = "begin"
+	var tokens_increased = 0
 	while token_idx < token_size:
 		var current_type = tokens[token_idx].type
 		current_type = "math_" if current_type.begins_with("math_") else current_type
@@ -330,19 +332,34 @@ func get_expression_sequence(tokens, token_size, token_idx):
 			break
 		if !expression_acceptance_table[prev_type].has(current_type):
 			break
-		if expression_acceptance_table[prev_type][current_type]:
+		
+		if expression_acceptance_table[prev_type][current_type] && bracket_function_count == 0:
+			# if this is a function call, ignore everything until we're outside of the argument range
+			if prev_type == "call" && current_type == "bracket_left":
+				bracket_function_count = 1
+			else:
+				if current_type == "bracket_left":
+					bracket_pair_count += 1
+				elif current_type == "bracket_right":
+					bracket_pair_count -= 1
+				if bracket_pair_count < 0:
+					break
+				sequence.append(tokens[token_idx])
+		elif bracket_function_count != 0:
 			if current_type == "bracket_left":
-				bracket_pair_count += 1
+				bracket_function_count += 1
 			elif current_type == "bracket_right":
-				bracket_pair_count -= 1
-			if bracket_pair_count < 0:
-				break
-			sequence.append(tokens[token_idx])
+				bracket_function_count -= 1
+			
+			# if we exit the argument range, then pretend it didn't exist and say the previous type was call
+			if bracket_function_count == 0:
+				current_type = "call"
 		else:
 			break
 		
 		prev_type = current_type
 		token_idx += 1
+		tokens_increased += 1
 	
 	# if we actually detected an expression, make sure to handle the brackets properly
 	var return_seq = sequence
@@ -366,7 +383,7 @@ func get_expression_sequence(tokens, token_size, token_idx):
 		return_seq = queue
 	
 	# return
-	return [return_seq, sequence.size()]
+	return [return_seq, tokens_increased]
 
 # get a sequence of parameters, this will only work when called on a valid sequence
 # it returns the sequence of tokens, the actual size it read and the actual parameter names
@@ -431,7 +448,8 @@ func interpret(scope):
 		print(
 			"\t".repeat(scope_stack.size()),
 			"EXEC: " if scope.handle_expr[0] == -1 else "EXPRESSION: ",
-			token_idx, " : ", token.body
+			token_idx, " : ", token.body,
+			" (%s)" % token.type
 		)
 		
 		var possible_value = token
@@ -443,20 +461,17 @@ func interpret(scope):
 				var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
 				if expr_seq[0].size() > 1:
 					scope.handle_expr = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
-#					print("oh-oh ", expr_seq)
 			elif token_idx == scope.handle_expr[0]:
 				idx_inc = scope.handle_expr[2][1]
 				possible_value = handle_expression(scope, scope.handle_expr[2][0])
-#				print("SET VALUE: ", possible_value, " - ", scope.handle_expr[2][0])
 				scope.handle_expr = [-1, -1, []]
 				expr_finished = true
 			elif token_idx == scope.handle_expr[1]:
 				idx_inc -= scope.handle_expr[2][1]
 		
-#		print(token)
 		if token.type == "call" && !expr_finished:
 			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
-			idx_inc = args[1] + 1
+			idx_inc = args[1]
 			
 			# if we just returned, don't go back again
 			if return_data:
@@ -498,10 +513,11 @@ func interpret(scope):
 				
 				# inject variables
 				for idx in scope.params.size():
-					scope.variables[scope.params[idx]] = args[0][idx]
-				
-				for keys in scope.variables.keys():
-					print("\t\t\t\t%s: %s" % [keys, scope.variables[keys]])
+					if args[0][idx].type == "scope":
+						args[0][idx].func_id = scope.params[idx]
+						scope.funcs.append(args[0][idx])
+					else:
+						scope.variables[scope.params[idx]] = args[0][idx]
 				
 				token_size = scope.tokens.size()
 				token_idx = 0
