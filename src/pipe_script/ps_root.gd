@@ -152,23 +152,27 @@ func print_scope(scope, prefix = ""):
 			print(prefix, idx, "> ", token)
 		idx += 1
 
+func create_scope_token(parent, func_name = "?unknown", params = [], guard = [], tokens = []):
+	return {
+		body = "", # keep this empty
+		type = "scope",
+		func_id = func_name, # the function name/id
+		params = params, # function parameters
+		guard_expr = guard, # the function guard
+		variables = {}, # defined variables in this function
+		funcs = [], # defined functions in this function
+		tokens = tokens, # tokens to be interpreted in this function
+		parent_scope = parent, # a reference to the parent scope, NOT the previous scope
+		handle_expr = [-1, -1, []], # the expression currently being 'compiled'
+		args_stack = [] # the stack for storing function arguments
+	}
+
 # put tokens from functions into chunks, so it's easier for the interpreter to read
 func chunkify_tokens(tokens):
 	var token_idx = 0
 	var token_size = tokens.size()
 	var stack = []
-	var scope = {
-		body = "", # keep this empty
-		type = "scope",
-		func_id = ".?", # the function name/id
-		params = [], # function parameters
-		guard_expr = [], # the function guard
-		variables = {}, # defined variables in this function
-		funcs = [], # defined functions in this function
-		tokens = [], # tokens to be interpreted in this function
-		parent_scope = null, # a reference to the parent scope, NOT the previous scope
-		handle_expr = [-1, -1, []], # the expression currently being 'compiled'
-	}
+	var scope = create_scope_token(null, ".?")
 	while token_idx < token_size:
 		var token = tokens[token_idx]
 		if token.type == "func_left":
@@ -197,18 +201,7 @@ func chunkify_tokens(tokens):
 				scope.tokens.pop_back()
 			
 			stack.append(scope)
-			scope = {
-				body = "",
-				type = "scope",
-				func_id = func_name,
-				params = params_data[2],
-				guard_expr = guard[0],
-				variables = {},
-				funcs = [],
-				tokens = [],
-				parent_scope = scope,
-				handle_expr = [-1, -1, []],
-			}
+			scope = create_scope_token(scope, func_name, params_data[2], guard[0])
 		elif token.type == "func_right":
 			token = scope
 			scope = stack.pop_back()
@@ -408,7 +401,7 @@ func get_param_sequence(tokens, token_size, token_idx):
 func call_builtin(token):
 	pass
 
-func get_argument_sequence(tokens, token_size, token_idx):
+func get_argument_sequence(scope, tokens, token_size, token_idx):
 	var args = []
 	var actual_size = 1
 	while token_idx < token_size:
@@ -469,13 +462,37 @@ func interpret(scope):
 			elif token_idx == scope.handle_expr[1]:
 				idx_inc -= scope.handle_expr[2][1]
 		
+		# call the function when we collected all the arguments
+		if scope.args_stack.size() > 0 && token_idx == scope.args_stack.back().end_idx && !expr_finished:
+		
+			var args_dict = scope.args_stack.pop_back()
+			
+			# switch to the new scope
+			scope_stack.append([scope, args_dict.begin_idx])
+			scope = args_dict.target_scope
+			
+			# inject variables
+			for idx in scope.params.size():
+				if args_dict.args[idx].type == "scope":
+					args_dict.args[idx].func_id = scope.params[idx]
+					scope.funcs.append(args_dict.args[idx])
+				else:
+					scope.variables[scope.params[idx]] = args_dict.args[idx]
+			
+			token_size = scope.tokens.size()
+			token_idx = 0
+			idx_inc = 0
+		
+#		for k in scope.variables.keys():
+#			print("%s: %s" % [k, scope.variables[k]])
+		
 		if token.type == "call" && !expr_finished:
-			var args = get_argument_sequence(scope.tokens, token_size, token_idx + 1)
-			idx_inc = args[1]
+			# TODO: simplify this function, since we only need the increased amount
+			var args = get_argument_sequence(scope, scope.tokens, token_size, token_idx + 1)
 			
 			# if we just returned, don't go back again
 			if return_data:
-				print(return_data)
+				print("RETURN: ", return_data)
 				possible_value = return_data
 				return_data = null
 				
@@ -487,6 +504,7 @@ func interpret(scope):
 						if actual_expr[target_idx].type == "call":
 							actual_expr[target_idx] = possible_value
 							break
+				idx_inc = args[1]
 			else:
 				
 				# find the function to switch too
@@ -504,24 +522,23 @@ func interpret(scope):
 						break
 					search_in_scope = search_in_scope.parent_scope
 				if target_scope == null:
-					printerr("ERROR:\nLine %d: Attempt to call undefined function." % token.line)
+					printerr(
+						"ERROR:\nLine %d: Attempt to call undefined function (%s) with %d given arguments."
+						% [
+							token.line,
+							token.body,
+							args[0].size()
+						])
 					break
 				
-				# switch to the new scope
-				scope_stack.append([scope, token_idx])
-				scope = target_scope
+				scope.args_stack.append({
+					args = [],
+					begin_idx = token_idx,
+					end_idx = token_idx + args[1],
+					target_scope = target_scope
+				})
 				
-				# inject variables
-				for idx in scope.params.size():
-					if args[0][idx].type == "scope":
-						args[0][idx].func_id = scope.params[idx]
-						scope.funcs.append(args[0][idx])
-					else:
-						scope.variables[scope.params[idx]] = args[0][idx]
-				
-				token_size = scope.tokens.size()
-				token_idx = 0
-				idx_inc = 0
+				idx_inc = 2
 		
 		if prev_token && dprev_token && (dprev_token.type == "raw" && !return_data) && prev_token.type == "assign":
 			if possible_value.type == "scope":
@@ -533,6 +550,14 @@ func interpret(scope):
 				scope.variables[dprev_token.body] = possible_value
 		elif token.type == "scope":
 			scope.funcs.append(token)
+		
+		# if we're currently collecting data for function arguments
+		# then make to actually store it
+		if scope.handle_expr[0] == -1 && (possible_value.type == "string" || possible_value.type == "number"):
+			var args_dict = scope.args_stack.back()
+			if args_dict && args_dict.end_idx != -1:
+				print("APPEND TO ARGS: ", possible_value)
+				args_dict.args.append(possible_value)
 		
 		# increment the token index
 		token_idx += idx_inc
