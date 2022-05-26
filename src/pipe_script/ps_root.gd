@@ -489,7 +489,7 @@ func interpret(scope):
 			# switch to the new scope
 			scope_stack.append([scope, args_dict.begin_idx])
 			scope = args_dict.target_scope
-			print(" BEGIN/END %s %s" % [args_dict.begin_idx, args_dict.end_idx])
+#			print(" BEGIN/END %s %s" % [args_dict.begin_idx, args_dict.end_idx])
 			
 			# inject variables
 			for idx in scope.params.size():
@@ -498,8 +498,8 @@ func interpret(scope):
 					scope.funcs.append(args_dict.args[idx])
 				else:
 					scope.variables[scope.params[idx]] = args_dict.args[idx]
-					print("  SET VAR: ", scope.params[idx], " = ", args_dict.args[idx])
-			print(" ---")
+#					print("  SET VAR: ", scope.params[idx], " = ", args_dict.args[idx])
+#			print(" ---")
 			
 			token_size = scope.tokens.size()
 			token_idx = 0
@@ -514,7 +514,7 @@ func interpret(scope):
 			
 			# if we just returned, don't go back again
 			if return_data:
-				print("RETURN: ", return_data)
+#				print("RETURN: ", return_data)
 				possible_value = return_data
 				return_data = null
 				
@@ -591,11 +591,11 @@ func interpret(scope):
 			if possible_value.type == "raw":
 				possible_value = get_variable(scope, possible_value.body)
 			return_data = possible_value
-			print("  EXITED FUNCTION (%s) IDX (%s)" % [scope.func_id, token_idx])
-			for k in scope.variables.keys():
-				print("\t", k, "=", scope.variables[k])
-			print("\tRETURNING WITH: ", return_data)
-			print("  REAL EXIT")
+#			print("  EXITED FUNCTION (%s) IDX (%s)" % [scope.func_id, token_idx])
+#			for k in scope.variables.keys():
+#				print("\t", k, "=", scope.variables[k])
+#			print("\tRETURNING WITH: ", return_data)
+#			print("  REAL EXIT")
 			
 			var prev = scope_stack.pop_back()
 			scope = prev[0]
