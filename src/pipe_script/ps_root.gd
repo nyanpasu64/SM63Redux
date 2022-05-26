@@ -151,6 +151,7 @@ func print_scope(scope, prefix = ""):
 		else:
 			print(prefix, idx, "> ", token)
 		idx += 1
+	print()
 
 func create_scope_token(parent, func_name = "?unknown", params = [], guard = [], tokens = []):
 	return {
@@ -230,7 +231,15 @@ func get_variable(scope, var_name):
 	return null
 
 # actually evaluate the provided expression
-func handle_expression(scope, expr, extra_variables = []):
+func handle_expression(scope, global_expr, extra_variables = []):
+	# clone the expression, so when we swap variables we don't mutate the global token list
+	var expr = []
+	for token in global_expr:
+		var cloned = {}
+		for key in token.keys():
+			cloned[key] = token[key]
+		expr.append(cloned)
+	
 	var idx = 0
 	var size = expr.size()
 	# first handle all brackets
@@ -401,32 +410,41 @@ func get_param_sequence(tokens, token_size, token_idx):
 func call_builtin(token):
 	pass
 
-func get_argument_sequence(scope, tokens, token_size, token_idx):
-	var args = []
-	var actual_size = 1
+# calculates how many arguments a function has, and how many tokens it should iterate for them
+# returns [iterated tokens, argument count]
+func get_argument_count(scope, tokens, token_size, token_idx):
+	print("\tARG COUNT START FROM ", token_idx)
+	token_idx += 2 # we add 2 to offset from the actual call token
+	var iterated_tokens = 2
+	var arg_count = 0
 	while token_idx < token_size:
+		var inc_idx = 1
 		var token = tokens[token_idx]
-		var idx_inc = 1
-		if token.type == "bracket_left":
-			pass
-		elif token.type == "bracket_right":
+		
+		if token.type == "bracket_right":
+			iterated_tokens += 1
 			break
+		elif token.type == "call":
+			arg_count += 1
+			inc_idx = get_argument_count(scope, tokens, token_size, token_idx)[0]
 		else:
 			var expr = get_expression_sequence(tokens, token_size, token_idx)
 			if expr[0].size() > 1:
-				args.append(expr[0])
-				idx_inc = expr[1]
+				arg_count += 1
+				inc_idx = expr[1]
 			elif is_value(token):
-				args.append(token)
-		token_idx += idx_inc
-		actual_size += idx_inc
-	return [args, actual_size]
+				arg_count += 1
+			
+		token_idx += inc_idx
+		iterated_tokens += inc_idx
+	print("\tARG COUNT END %s %s" % [iterated_tokens, arg_count])
+	return [iterated_tokens, arg_count]
 
 # interprets the tokens & executes them
 func interpret(scope):
 	var root_scope = scope # just in case
 	var scope_stack = []
-#	print_scope(scope)
+	print_scope(scope)
 	
 	var return_data = null
 	
@@ -466,10 +484,12 @@ func interpret(scope):
 		if scope.args_stack.size() > 0 && token_idx == scope.args_stack.back().end_idx && !expr_finished:
 		
 			var args_dict = scope.args_stack.pop_back()
+#			print(args_dict.args, " ", args_dict.begin_idx, " ", args_dict.end_idx)
 			
 			# switch to the new scope
 			scope_stack.append([scope, args_dict.begin_idx])
 			scope = args_dict.target_scope
+			print(" BEGIN/END %s %s" % [args_dict.begin_idx, args_dict.end_idx])
 			
 			# inject variables
 			for idx in scope.params.size():
@@ -478,6 +498,8 @@ func interpret(scope):
 					scope.funcs.append(args_dict.args[idx])
 				else:
 					scope.variables[scope.params[idx]] = args_dict.args[idx]
+					print("  SET VAR: ", scope.params[idx], " = ", args_dict.args[idx])
+			print(" ---")
 			
 			token_size = scope.tokens.size()
 			token_idx = 0
@@ -488,7 +510,7 @@ func interpret(scope):
 		
 		if token.type == "call" && !expr_finished:
 			# TODO: simplify this function, since we only need the increased amount
-			var args = get_argument_sequence(scope, scope.tokens, token_size, token_idx + 1)
+			var arg_counts = get_argument_count(scope, scope.tokens, token_size, token_idx)
 			
 			# if we just returned, don't go back again
 			if return_data:
@@ -504,7 +526,7 @@ func interpret(scope):
 						if actual_expr[target_idx].type == "call":
 							actual_expr[target_idx] = possible_value
 							break
-				idx_inc = args[1]
+				idx_inc = arg_counts[0]
 			else:
 				
 				# find the function to switch too
@@ -512,9 +534,9 @@ func interpret(scope):
 				var search_in_scope = scope
 				while search_in_scope:
 					for new_scope in search_in_scope.funcs:
-						if new_scope.func_id == token.body && new_scope.params.size() == args[0].size():
+						if new_scope.func_id == token.body && new_scope.params.size() == arg_counts[1]:
 							#TODO: do the guard check
-		#					handle_expression(scope, new_scope.guard_expr)
+							#handle_expression(scope, new_scope.guard_expr)
 							target_scope = new_scope
 							#handle_expression(new_scope.guard_expr)
 							break
@@ -527,14 +549,14 @@ func interpret(scope):
 						% [
 							token.line,
 							token.body,
-							args[0].size()
+							arg_counts[1]
 						])
 					break
 				
 				scope.args_stack.append({
 					args = [],
 					begin_idx = token_idx,
-					end_idx = token_idx + args[1],
+					end_idx = token_idx + arg_counts[0] - 1,
 					target_scope = target_scope
 				})
 				
@@ -556,8 +578,9 @@ func interpret(scope):
 		if scope.handle_expr[0] == -1 && (possible_value.type == "string" || possible_value.type == "number"):
 			var args_dict = scope.args_stack.back()
 			if args_dict && args_dict.end_idx != -1:
-				print("APPEND TO ARGS: ", possible_value)
+#				print("APPEND TO ARGS: ", possible_value)
 				args_dict.args.append(possible_value)
+#				print("ARGS LIST: ", args_dict.args)
 		
 		# increment the token index
 		token_idx += idx_inc
@@ -568,6 +591,11 @@ func interpret(scope):
 			if possible_value.type == "raw":
 				possible_value = get_variable(scope, possible_value.body)
 			return_data = possible_value
+			print("  EXITED FUNCTION (%s) IDX (%s)" % [scope.func_id, token_idx])
+			for k in scope.variables.keys():
+				print("\t", k, "=", scope.variables[k])
+			print("\tRETURNING WITH: ", return_data)
+			print("  REAL EXIT")
 			
 			var prev = scope_stack.pop_back()
 			scope = prev[0]
