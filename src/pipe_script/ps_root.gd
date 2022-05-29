@@ -493,6 +493,9 @@ func interpret(scope):
 			
 			# inject variables
 			for idx in scope.params.size():
+				print("ADD: ", idx)
+				print("ARG_SIZE: ", args_dict.args.size())
+				print("  TYPE: ", args_dict.args[idx].type)
 				if args_dict.args[idx].type == "scope":
 					args_dict.args[idx].func_id = scope.params[idx]
 					scope.funcs.append(args_dict.args[idx])
@@ -543,14 +546,22 @@ func interpret(scope):
 					if target_scope:
 						break
 					search_in_scope = search_in_scope.parent_scope
+				# error handling
 				if target_scope == null:
-					printerr(
-						"ERROR:\nLine %d: Attempt to call undefined function (%s) with %d given arguments."
-						% [
-							token.line,
-							token.body,
-							arg_counts[1]
-						])
+					var error_log = "ERROR:\nLine %d: Attempt to call undefined function (%s) with %d given arguments.\n" % [
+						token.line,
+						token.body,
+						arg_counts[1]
+					]
+					error_log += "--- FUNCTION TRACE ---\n"
+					search_in_scope = scope
+					while search_in_scope:
+						for err_scope in search_in_scope.funcs:
+							if err_scope.func_id == token.body:
+								error_log += "Function %s with arity %d.\n" % [err_scope.func_id, err_scope.params.size()]
+						search_in_scope = search_in_scope.parent_scope
+					error_log += "--- - ---"
+					printerr(error_log)
 					break
 				
 				scope.args_stack.append({
@@ -575,10 +586,14 @@ func interpret(scope):
 		
 		# if we're currently collecting data for function arguments
 		# then make to actually store it
-		if scope.handle_expr[0] == -1 && (possible_value.type == "string" || possible_value.type == "number"):
+		# CURRENT PROBLEM
+		# "5 + ?call.func(@() { 5 })" the @() {5} won't be added since it thinks it's part of an expression
+		# which sorta the case but also not the way we intend it to be
+		if scope.handle_expr[0] == -1 && (possible_value.type == "scope" || possible_value.type == "string" || possible_value.type == "number"):
 			var args_dict = scope.args_stack.back()
 			if args_dict && args_dict.end_idx != -1:
 #				print("APPEND TO ARGS: ", possible_value)
+				print("ADDING!!! ", possible_value.type)
 				args_dict.args.append(possible_value)
 #				print("ARGS LIST: ", args_dict.args)
 		
@@ -707,11 +722,9 @@ func parse_tokens(body: String):
 			else:
 				# merge the call type into a singular token
 				if make_next_call:
-					if tokens[token_idx].type != "raw" && tokens[token_idx].type != "anon_func":
+					if tokens[token_idx].type != "raw":
 						printerr("COMPILE ERROR:\nLine %d: Can only call function names." % tokens[token_idx].line)
 						break
-					if tokens[token_idx].type == "anon_func":
-						tokens[token_idx].body = "?anon_func"
 					tokens[token_idx].type = "call"
 					make_next_call = false
 				# convert atoms into strings

@@ -1,14 +1,8 @@
 
-add(a, b) {
-	a + b
+call.func(func) {
+	?func()
 }
 
-foo() {
-	?add(1, 2)
-}
-
-b = ?add(
-	?foo(),
-	?add(3, 4)
-)
-a = b + 5
+a = ?call.func(@() {
+	5 + ?call.func(@() { 5 })
+})
