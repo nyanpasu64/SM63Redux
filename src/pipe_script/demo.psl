@@ -1,8 +1,8 @@
 
-call.func(func) {
-	?func()
+outer(inner) {
+	?inner()
 }
 
-a = ?call.func(@() {
-	5 + ?call.func(@() { 5 })
+a = ?outer(@() {
+	5 + ?outer(@() { 2 })
 })

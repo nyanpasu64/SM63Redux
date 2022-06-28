@@ -38,7 +38,7 @@ var token_types = {
 }
 
 var math_order = {
-	"logic_not": 5,
+	"logic_not": 6,
 	"math_mul": 5,
 	"math_div": 5,
 	"math_add": 4,
@@ -151,7 +151,6 @@ func print_scope(scope, prefix = ""):
 		else:
 			print(prefix, idx, "> ", token)
 		idx += 1
-	print()
 
 func create_scope_token(parent, func_name = "?unknown", params = [], guard = [], tokens = []):
 	return {
@@ -164,8 +163,9 @@ func create_scope_token(parent, func_name = "?unknown", params = [], guard = [],
 		funcs = [], # defined functions in this function
 		tokens = tokens, # tokens to be interpreted in this function
 		parent_scope = parent, # a reference to the parent scope, NOT the previous scope
-		handle_expr = [-1, -1, []], # the expression currently being 'compiled'
-		args_stack = [] # the stack for storing function arguments
+		args_stack = [{
+			handle_expr = [-1, -1, []], # the expression currently being 'compiled'
+		}] # the stack for storing function arguments
 	}
 
 # put tokens from functions into chunks, so it's easier for the interpreter to read
@@ -413,7 +413,7 @@ func call_builtin(token):
 # calculates how many arguments a function has, and how many tokens it should iterate for them
 # returns [iterated tokens, argument count]
 func get_argument_count(scope, tokens, token_size, token_idx):
-	print("\tARG COUNT START FROM ", token_idx)
+#	print("\tARG COUNT START FROM ", token_idx)
 	token_idx += 2 # we add 2 to offset from the actual call token
 	var iterated_tokens = 2
 	var arg_count = 0
@@ -437,7 +437,7 @@ func get_argument_count(scope, tokens, token_size, token_idx):
 			
 		token_idx += inc_idx
 		iterated_tokens += inc_idx
-	print("\tARG COUNT END %s %s" % [iterated_tokens, arg_count])
+#	print("\tARG COUNT END %s %s" % [iterated_tokens, arg_count])
 	return [iterated_tokens, arg_count]
 
 # interprets the tokens & executes them
@@ -445,6 +445,7 @@ func interpret(scope):
 	var root_scope = scope # just in case
 	var scope_stack = []
 	print_scope(scope)
+	print()
 	
 	var return_data = null
 	
@@ -458,8 +459,9 @@ func interpret(scope):
 		
 		print(
 			"\t".repeat(scope_stack.size()),
-			"EXEC: " if scope.handle_expr[0] == -1 else "EXPRESSION: ",
-			token_idx, " : ", token.body,
+			"EXEC: " if scope.args_stack.back().handle_expr[0] == -1 else "EXPRESSION: ",
+			"<%s, %s> | " % [scope.args_stack.back().handle_expr[0], scope.args_stack.back().handle_expr[1]],
+			"%s => %s" % [token_idx, token.body],
 			" (%s)" % token.type
 		)
 		
@@ -468,36 +470,41 @@ func interpret(scope):
 		var expr_finished = false
 		if !return_data:
 			# the !return_data check is to prevent function returns creating more expressions
-			if scope.handle_expr[0] == -1:
+			if scope.args_stack.back().handle_expr[0] == -1:
 				var expr_seq = get_expression_sequence(scope.tokens, token_size, token_idx)
 				if expr_seq[0].size() > 1:
-					scope.handle_expr = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
-			elif token_idx == scope.handle_expr[0]:
-				idx_inc = scope.handle_expr[2][1]
-				possible_value = handle_expression(scope, scope.handle_expr[2][0])
-				scope.handle_expr = [-1, -1, []]
+					print("SETTING EXPR")
+					scope.args_stack.back().handle_expr = [token_idx, token_idx + expr_seq[1] - 1, expr_seq]
+			elif token_idx == scope.args_stack.back().handle_expr[0]:
+				idx_inc = scope.args_stack.back().handle_expr[2][1]
+				possible_value = handle_expression(scope, scope.args_stack.back().handle_expr[2][0])
+				scope.args_stack.back().handle_expr = [-1, -1, []]
 				expr_finished = true
-			elif token_idx == scope.handle_expr[1]:
-				idx_inc -= scope.handle_expr[2][1]
+			elif token_idx == scope.args_stack.back().handle_expr[1]:
+				idx_inc -= scope.args_stack.back().handle_expr[2][1]
 		
 		# call the function when we collected all the arguments
-		if scope.args_stack.size() > 0 && token_idx == scope.args_stack.back().end_idx && !expr_finished:
+		# we do > 1 because the first stack is ours
+		if scope.args_stack.size() > 1 && token_idx == scope.args_stack.back().end_idx && !expr_finished:
 		
 			var args_dict = scope.args_stack.pop_back()
+			print("ARG DICT SIZE %s" % len(args_dict))
 #			print(args_dict.args, " ", args_dict.begin_idx, " ", args_dict.end_idx)
 			
 			# switch to the new scope
 			scope_stack.append([scope, args_dict.begin_idx])
 			scope = args_dict.target_scope
+			
 #			print(" BEGIN/END %s %s" % [args_dict.begin_idx, args_dict.end_idx])
 			
 			# inject variables
 			for idx in scope.params.size():
-				print("ADD: ", idx)
-				print("ARG_SIZE: ", args_dict.args.size())
-				print("  TYPE: ", args_dict.args[idx].type)
+#				print("ADD: ", idx)
+#				print("ARG_SIZE: ", args_dict.args.size())
+#				print("  TYPE: ", args_dict.args[idx].type)
 				if args_dict.args[idx].type == "scope":
 					args_dict.args[idx].func_id = scope.params[idx]
+					print("[AS ARGS] appending %s to scope %s" % [args_dict.args[idx], scope.func_id])
 					scope.funcs.append(args_dict.args[idx])
 				else:
 					scope.variables[scope.params[idx]] = args_dict.args[idx]
@@ -512,7 +519,6 @@ func interpret(scope):
 #			print("%s: %s" % [k, scope.variables[k]])
 		
 		if token.type == "call" && !expr_finished:
-			# TODO: simplify this function, since we only need the increased amount
 			var arg_counts = get_argument_count(scope, scope.tokens, token_size, token_idx)
 			
 			# if we just returned, don't go back again
@@ -522,9 +528,9 @@ func interpret(scope):
 				return_data = null
 				
 				# swap expression function calls with their return value
-				if scope.handle_expr[0] != -1:
+				if scope.args_stack.back().handle_expr[0] != -1:
 					# find the earliest function call, and swap that
-					var actual_expr = scope.handle_expr[2][0]
+					var actual_expr = scope.args_stack.back().handle_expr[2][0]
 					for target_idx in actual_expr.size():
 						if actual_expr[target_idx].type == "call":
 							actual_expr[target_idx] = possible_value
@@ -564,10 +570,12 @@ func interpret(scope):
 					printerr(error_log)
 					break
 				
+				print("ADDED %s TO STACK" % target_scope.func_id)
 				scope.args_stack.append({
 					args = [],
 					begin_idx = token_idx,
 					end_idx = token_idx + arg_counts[0] - 1,
+					handle_expr = [-1, -1, []],
 					target_scope = target_scope
 				})
 				
@@ -578,24 +586,27 @@ func interpret(scope):
 				# we don't assign functions to variables,
 				# we simply change the func_id
 				possible_value.func_id = dprev_token.body
+				print("[INDIRECT] appending %s to scope %s" % [token.body, scope.func_id])
 				scope.funcs.append(possible_value)
 			elif possible_value.type != "call":
 				scope.variables[dprev_token.body] = possible_value
 		elif token.type == "scope":
+			print("[NORMAL] appending %s to scope %s" % [token.body, scope.func_id])
+			#print(token)
 			scope.funcs.append(token)
 		
 		# if we're currently collecting data for function arguments
 		# then make to actually store it
 		# CURRENT PROBLEM
-		# "5 + ?call.func(@() { 5 })" the @() {5} won't be added since it thinks it's part of an expression
-		# which sorta the case but also not the way we intend it to be
-		if scope.handle_expr[0] == -1 && (possible_value.type == "scope" || possible_value.type == "string" || possible_value.type == "number"):
+		# as seen by running the program, it uses the same scope for some reason
+		# which leads to the interpreter freaking out
+		# POSSIBLE FIX:
+		# once a function token finished executing, reset that token completely
+		if scope.args_stack.back().handle_expr[0] == -1 && (possible_value.type == "scope" || possible_value.type == "string" || possible_value.type == "number"):
 			var args_dict = scope.args_stack.back()
-			if args_dict && args_dict.end_idx != -1:
-#				print("APPEND TO ARGS: ", possible_value)
-				print("ADDING!!! ", possible_value.type)
+			if scope.args_stack.size() > 1 && args_dict.end_idx != -1:
+#				print("ADDING!!! ", possible_value.type)
 				args_dict.args.append(possible_value)
-#				print("ARGS LIST: ", args_dict.args)
 		
 		# increment the token index
 		token_idx += idx_inc
@@ -611,6 +622,7 @@ func interpret(scope):
 #				print("\t", k, "=", scope.variables[k])
 #			print("\tRETURNING WITH: ", return_data)
 #			print("  REAL EXIT")
+			print("boop we're going back")
 			
 			var prev = scope_stack.pop_back()
 			scope = prev[0]
