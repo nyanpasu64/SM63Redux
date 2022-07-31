@@ -1,5 +1,23 @@
 extends Node
 
+ #########################################
+#                                         #
+#   /$$$$$$  /$$$$$$$$ /$$$$$$  /$$$$$$$  #
+#  /$$__  $$|__  $$__//$$__  $$| $$__  $$ #
+# | $$  \__/   | $$  | $$  \ $$| $$  \ $$ #
+# |  $$$$$$    | $$  | $$  | $$| $$$$$$$/ #
+#  \____  $$   | $$  | $$  | $$| $$____/  #
+#  /$$  \ $$   | $$  | $$  | $$| $$       #
+# |  $$$$$$/   | $$  |  $$$$$$/| $$       #
+#  \______/    |__/   \______/ |__/       #
+#                                         #
+ #########################################
+
+# This project is currently on-hold. The direction is still not very clear and can be changed.
+# Therefore I do not recommend making a pull-request for this file to fix stuff or
+# adding new features, as we might scrap it all together.
+# Thanks! -jaschutte
+
 func read_file(path):
 	var file = File.new()
 	file.open(path, File.READ)
