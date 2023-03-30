@@ -144,12 +144,18 @@ func _on_HurtboxStomp_area_entered(area):
 
 
 func _on_HurtboxStrike_body_entered(body):
-	if _strike_check(body):
+	print("entity_enemy#_on_HurtboxStrike_body_entered()")
+	var player_attacking = _strike_check(body)
+	print("\tplayer attacking = ", player_attacking)
+	if player_attacking:
 		_hurt_struck(body)
 
 
 func _on_Hitbox_body_entered(body):
-	if !struck and !stomped:
+	print("entity_enemy#_on_Hitbox_body_entered()")
+	var enemy_attacking = !struck and !stomped
+	print("\tenemy attacking = ", enemy_attacking)
+	if enemy_attacking:
 		body.take_damage_shove(1, sign(body.position.x - position.x))
 
 

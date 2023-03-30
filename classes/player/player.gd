@@ -289,6 +289,7 @@ var pound_land_frames: int = 0
 var pound_state: int = Pound.SPIN
 var solid_floors: int = 0
 func player_physics():
+	print("player.player_physics()")
 	fludd_stale = true
 	
 	check_ground_state()

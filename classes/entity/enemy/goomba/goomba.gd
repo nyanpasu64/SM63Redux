@@ -14,6 +14,7 @@ onready var sfx_jump = $SFXJump
 
 
 func _physics_step():
+	print("goomba._physics_step()")
 	if stomped:
 		if dead:
 			enemy_die()
